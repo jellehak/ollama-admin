@@ -1,0 +1,15 @@
+{
+  "name": "Ollama Admin",
+  "short_name": "Ollama Admin",
+  "description": "A lightweight administration dashboard for Ollama.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f1eb",
+  "theme_color": "#f4f1eb",
+  "icons": [{
+    "src": "assets/logo.svg",
+    "sizes": "any",
+    "type": "image/svg+xml",
+    "purpose": "any maskable"
+  }]
+}

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f1eb">
+  <meta name="description" content="A lightweight administration dashboard for Ollama.">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <title>Ollama Admin</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" v-cloak>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="Ollama Admin home">
+        <img src="assets/logo.svg" alt="">
+        <span>OLLAMA <b>ADMIN</b></span>
+      </a>
+      <div class="connection">
+        <span class="status-dot" :class="{ online: connected }"></span>
+        <span>{{ connected ? 'CONNECTED' : 'OFFLINE' }}</span>
+        <button class="icon-button" type="button" title="Refresh models" @click="refreshAll" :disabled="loading"><span :class="{ spinning: loading }">↻</span></button>
+      </div>
+    </header>
+
+    <main id="top" class="shell">
+      <section class="intro">
+        <div>
+          <p class="eyebrow">LOCAL MODEL CONTROL</p>
+          <h1>Keep your models<br><em>close at hand.</em></h1>
+        </div>
+        <p class="intro-copy">A quiet control surface for your local Ollama instance. Pull what you need, see what is active, and chat without leaving the room.</p>
+      </section>
+
+      <section class="settings-strip" aria-label="Connection settings">
+        <label for="endpoint">OLLAMA ENDPOINT</label>
+        <input id="endpoint" v-model.trim="endpoint" @change="saveEndpoint" spellcheck="false">
+        <span class="settings-note">{{ lastUpdated ? `Updated ${lastUpdated}` : 'Ready to connect' }}</span>
+      </section>
+
+      <div v-if="error" class="alert" role="alert"><strong>Request failed.</strong> {{ error }} <button type="button" @click="error = ''">Dismiss</button></div>
+
+      <section class="overview-grid">
+        <article class="stat-card stat-card-dark">
+          <span class="card-kicker">INSTALLED MODELS</span>
+          <strong>{{ models.length }}</strong>
+          <span class="card-foot">Available locally</span>
+        </article>
+        <article class="stat-card">
+          <span class="card-kicker">RUNNING NOW</span>
+          <strong>{{ runningModels.length }}</strong>
+          <span class="card-foot">Loaded into memory</span>
+        </article>
+        <article class="stat-card stat-card-accent">
+          <span class="card-kicker">LAST ACTIVITY</span>
+          <strong>{{ activityLabel }}</strong>
+          <span class="card-foot">{{ activityDetail }}</span>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <div class="models-section">
+          <div class="section-heading">
+            <div><p class="eyebrow">YOUR LIBRARY</p><h2>Models</h2></div>
+            <button class="button button-dark" type="button" @click="showPull = !showPull">{{ showPull ? 'Close' : '+ Pull model' }}</button>
+          </div>
+
+          <form v-if="showPull" class="inline-form" @submit.prevent="pullModel">
+            <input v-model.trim="pullName" placeholder="e.g. llama3.2" aria-label="Model name to pull" required>
+            <button class="button button-accent" type="submit" :disabled="busyAction">{{ busyAction === 'pull' ? 'Pulling...' : 'Start pull' }}</button>
+          </form>
+
+          <div class="model-list" :aria-busy="loading">
+            <div v-if="loading && !models.length" class="empty-state">Reading your local library...</div>
+            <div v-else-if="!models.length" class="empty-state">No models installed yet. Pull one to get started.</div>
+            <article v-for="model in models" :key="model.name" class="model-row">
+              <div class="model-mark">{{ model.name.slice(0, 1).toUpperCase() }}</div>
+              <div class="model-info"><h3>{{ model.name }}</h3><p>{{ formatSize(model.size) }} <span>·</span> {{ formatDate(model.modified_at) }}</p></div>
+              <span v-if="isRunning(model.name)" class="running-label"><i></i> RUNNING</span>
+              <button class="row-action" type="button" title="Delete model" @click="deleteModel(model.name)" :disabled="busyAction === `delete:${model.name}`">{{ busyAction === `delete:${model.name}` ? '...' : 'Delete' }}</button>
+            </article>
+          </div>
+        </div>
+
+        <aside class="side-column">
+          <section class="panel create-panel">
+            <div class="panel-heading"><div><p class="eyebrow">CUSTOM BUILDS</p><h2>Make a model</h2></div><span class="panel-icon">✦</span></div>
+            <p class="panel-copy">Create a named model from a Modelfile and make its behavior your own.</p>
+            <p class="modelfile-reference"><b>Required:</b> <code>FROM</code> · Add <code>PARAMETER</code>, <code>SYSTEM</code>, <code>TEMPLATE</code>, or <code>MESSAGE</code> as needed.</p>
+            <label class="field-label" for="create-name">MODEL NAME</label>
+            <input id="create-name" v-model.trim="createName" placeholder="my-assistant">
+            <label class="field-label" for="modelfile">MODELFILE</label>
+            <textarea id="modelfile" v-model="modelfile" rows="7" spellcheck="false"></textarea>
+            <button class="button button-accent full-width" type="button" @click="createModel" :disabled="busyAction === 'create'">{{ busyAction === 'create' ? 'Creating...' : 'Create model' }} <span>→</span></button>
+          </section>
+
+          <section class="panel running-panel">
+            <div class="panel-heading"><div><p class="eyebrow">MEMORY</p><h2>In use</h2></div><span class="panel-count">{{ runningModels.length }}</span></div>
+            <div v-if="!runningModels.length" class="mini-empty">Nothing is loaded right now.</div>
+            <div v-for="model in runningModels" :key="model.name" class="running-row"><span class="status-dot online"></span><strong>{{ model.name }}</strong><small>{{ formatSize(model.size) }}</small></div>
+          </section>
+        </aside>
+      </section>
+
+      <details class="chat-panel" open>
+        <summary><span><small>DIRECT LINE</small><strong>Chat with a model</strong></span><span class="summary-action">{{ chatOpenLabel }} <b>+</b></span></summary>
+        <div class="chat-content">
+          <div class="chat-toolbar"><select v-model="chatModel" aria-label="Chat model"><option value="" disabled>Select a model</option><option v-for="model in models" :key="model.name" :value="model.name">{{ model.name }}</option></select><span>Responses stream directly from Ollama</span></div>
+          <div class="messages" aria-live="polite"><div v-if="!messages.length" class="chat-empty">Choose a model and send a message to begin.</div><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role"><span class="message-role">{{ message.role === 'user' ? 'YOU' : 'OLLAMA' }}</span><p>{{ message.content }}</p></div></div>
+          <form class="chat-input" @submit.prevent="sendChat"><textarea v-model="chatPrompt" rows="2" placeholder="Ask something..." aria-label="Message" :disabled="chatBusy"></textarea><button class="send-button" type="submit" title="Send message" :disabled="chatBusy || !chatPrompt.trim()">↑</button></form>
+        </div>
+      </details>
+    </main>
+    <footer><span>OLLAMA ADMIN / V1</span><span>LOCAL FIRST · OPEN SOURCE</span></footer>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
